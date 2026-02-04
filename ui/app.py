@@ -10,6 +10,7 @@ import base64
 import random
 from datetime import datetime, timedelta
 import json
+import pathlib
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -111,29 +112,37 @@ st.markdown("""
 
 
 def load_image_as_base64(image_path: str) -> str:
-    """Load an image file and convert to base64 for display"""
+    """
+    Load an image file and convert to base64 for display.
+    Works on Windows + Streamlit Cloud (Linux).
+    """
     try:
+        # Normalize Windows-style paths → Linux-safe
+        image_path = image_path.replace("\\", "/")
+
         path = Path(image_path)
-        
-        # Handle relative paths
+
+        # If path is relative, resolve from project root
         if not path.is_absolute():
-            path = DATA_DIR / image_path
-        
-        if path.exists():
-            with open(path, 'rb') as f:
-                data = base64.b64encode(f.read()).decode()
-            
-            # Determine format from extension
-            ext = path.suffix.lower().replace('.', '')
-            if ext == 'jpg':
-                ext = 'jpeg'
-            
-            return f"data:image/{ext};base64,{data}"
-        else:
+            project_root = Path(__file__).parent.parent
+            path = project_root / path
+
+        if not path.exists():
             return None
+
+        with open(path, "rb") as f:
+            data = base64.b64encode(f.read()).decode("utf-8")
+
+        ext = path.suffix.lower().replace(".", "")
+        if ext == "jpg":
+            ext = "jpeg"
+
+        return f"data:image/{ext};base64,{data}"
+
     except Exception as e:
         st.error(f"Error loading image: {e}")
         return None
+
 
 
 def display_question_image(question):

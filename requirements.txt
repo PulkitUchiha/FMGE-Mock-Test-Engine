@@ -6,4 +6,5 @@ PyMuPDF
 Pillow
 plotly
 python-dateutil
+pathlib
 # hashlib-compat
