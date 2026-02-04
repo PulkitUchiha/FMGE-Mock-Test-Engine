@@ -836,6 +836,15 @@ def render_stats():
 
 def main():
     """Main application entry point"""
+    st.write("DATA_DIR:", DATA_DIR)
+    st.write("Processed images exists:", (DATA_DIR / "processed/images").exists())
+
+    if (DATA_DIR / "processed/images").exists():
+        st.write(
+            "Sample images:",
+            list((DATA_DIR / "processed/images").iterdir())[:3]
+        )
+
     init_session_state()
     render_sidebar()
     
