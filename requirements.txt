@@ -1,0 +1,9 @@
+streamlit
+pymupdf
+pillow
+pandas
+PyMuPDF
+Pillow
+plotly
+python-dateutil
+hashlib-compat
