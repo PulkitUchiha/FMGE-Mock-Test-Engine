@@ -113,19 +113,18 @@ st.markdown("""
 
 def load_image_as_base64(image_path: str) -> str:
     """
-    Load an image file and convert to base64 for display.
-    Works on Windows + Streamlit Cloud (Linux).
+    Robust image loader for Streamlit Cloud + Windows.
+    Correctly resolves paths relative to DATA_DIR.
     """
     try:
-        # Normalize Windows-style paths → Linux-safe
+        # Normalize Windows paths
         image_path = image_path.replace("\\", "/")
 
         path = Path(image_path)
 
-        # If path is relative, resolve from project root
+        # If relative, resolve from DATA_DIR (this is the key fix)
         if not path.is_absolute():
-            project_root = Path(__file__).parent.parent
-            path = project_root / path
+            path = DATA_DIR / path
 
         if not path.exists():
             return None
@@ -142,6 +141,7 @@ def load_image_as_base64(image_path: str) -> str:
     except Exception as e:
         st.error(f"Error loading image: {e}")
         return None
+
 
 
 
