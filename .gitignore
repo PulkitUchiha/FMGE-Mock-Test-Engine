@@ -10,3 +10,5 @@ storage/__pycache__/
 config/__pycache__/
 data/raw_pdfs/
 v0
+question extractor.py
+data/fmge_questions.json
