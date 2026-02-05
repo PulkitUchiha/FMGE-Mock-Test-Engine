@@ -836,13 +836,6 @@ def render_stats():
 
 def main():
 
-
-    if (DATA_DIR / "processed/images").exists():
-        st.write(
-            "Sample images:",
-            list((DATA_DIR / "processed/images").iterdir())[:3]
-        )
-
     init_session_state()
     render_sidebar()
     
