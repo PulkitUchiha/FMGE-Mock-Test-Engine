@@ -106,31 +106,32 @@ class ExamConfig:
     unattempted_marks: float = 0.0
 
 
-@dataclass
-class SubjectConfig:
-    """FMGE subject categories and keywords"""
-    
+    @dataclass
+    class SubjectConfig:
+        """FMGE subject categories and keywords"""
+        
     subjects: Dict[str, List[str]] = field(default_factory=lambda: {
-        "Anatomy": ["anatomy", "nerve", "muscle", "bone", "artery", "vein", "ligament"],
-        "Physiology": ["physiology", "hormone", "reflex", "cardiac output", "GFR"],
+        "Anatomy": ["nerve", "muscle", "bone", "artery", "vein", "ligament"],
+        "Physiology": ["hormone", "reflex", "cardiac output", "GFR"],
         "Biochemistry": ["enzyme", "metabolism", "vitamin", "protein", "amino acid"],
-        "Pathology": ["pathology", "tumor", "carcinoma", "necrosis", "inflammation"],
-        "Pharmacology": ["drug", "pharmacology", "dose", "mechanism", "receptor"],
+        "Pathology": ["tumor", "carcinoma", "necrosis", "inflammation"],
+        "Pharmacology": ["drug", "dose", "mechanism", "receptor"],
         "Microbiology": ["bacteria", "virus", "fungus", "parasite", "infection"],
-        "Forensic Medicine": ["forensic", "poison", "injury", "death", "autopsy"],
+        "Forensic Medicine": ["poison", "injury", "death", "autopsy"],
         "Community Medicine": ["epidemiology", "vaccine", "sanitation", "statistics"],
         "Ophthalmology": ["eye", "retina", "cornea", "vision", "glaucoma"],
         "ENT": ["ear", "nose", "throat", "hearing", "vertigo"],
         "Medicine": ["diabetes", "hypertension", "fever", "anemia", "jaundice"],
-        "Surgery": ["surgery", "surgical", "incision", "hernia", "appendix"],
-        "Pediatrics": ["child", "infant", "neonate", "pediatric", "vaccination"],
+        "Surgery": ["incision", "hernia", "appendix"],
+        "Pediatrics": ["child", "infant", "neonate", "vaccination"],
         "Obstetrics & Gynecology": ["pregnancy", "delivery", "uterus", "ovary", "menstrual"],
-        "Psychiatry": ["psychiatric", "depression", "schizophrenia", "anxiety"],
-        "Dermatology": ["skin", "rash", "lesion", "dermatology", "eczema"],
-        "Radiology": ["x-ray", "CT", "MRI", "ultrasound", "radiograph"],
-        "Anesthesia": ["anesthesia", "sedation", "intubation", "ventilation"],
-        "Orthopedics": ["fracture", "joint", "orthopedic", "dislocation"],
+        "Psychiatry": ["depression", "schizophrenia", "anxiety"],
+        "Dermatology": ["skin", "rash", "lesion", "eczema"],
+        "Radiology": ["x-ray", "ct", "mri", "ultrasound", "radiograph"],
+        "Anesthesia": ["sedation", "intubation", "ventilation"],
+        "Orthopedics": ["fracture", "joint", "dislocation"],
     })
+
 
 
 # Global config instances
