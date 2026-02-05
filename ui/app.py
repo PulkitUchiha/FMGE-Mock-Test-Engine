@@ -441,19 +441,28 @@ def render_exam():
             st.session_state.exam_submitted = True
             st.rerun()
     
-    # Question palette
     st.markdown("---")
     st.markdown("### Question Navigator")
-    
-    cols = st.columns(10)
-    for i, q in enumerate(questions):
-        col_idx = i % 10
-        with cols[col_idx]:
+
+    # Adjust buttons per row (mobile-friendly)
+    buttons_per_row = 4 if st.sidebar else 8
+
+    total_questions = len(questions)
+
+    for row_start in range(0, total_questions, buttons_per_row):
+        row_questions = questions[row_start: row_start + buttons_per_row]
+        cols = st.columns(len(row_questions))
+
+        for col, q in zip(cols, row_questions):
+            i = questions.index(q)
             answered = q.id in st.session_state.exam_answers
-            btn_label = f"{'✅' if answered else '⬜'} {i+1}"
-            if st.button(btn_label, key=f"nav_{i}"):
-                st.session_state.current_q_index = i
-                st.rerun()
+
+            label = f"{'✅' if answered else '⬜'} {i + 1}"
+
+            with col:
+                if st.button(label, key=f"nav_{i}"):
+                    st.session_state.current_q_index = i
+                    st.rerun()
 
 
 def render_exam_results():
