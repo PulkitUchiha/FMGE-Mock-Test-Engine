@@ -106,10 +106,10 @@ class ExamConfig:
     unattempted_marks: float = 0.0
 
 
-    @dataclass
-    class SubjectConfig:
-        """FMGE subject categories and keywords"""
-        
+@dataclass
+class SubjectConfig:
+    """FMGE subject categories and keywords"""
+    
     subjects: Dict[str, List[str]] = field(default_factory=lambda: {
         "Anatomy": ["nerve", "muscle", "bone", "artery", "vein", "ligament"],
         "Physiology": ["hormone", "reflex", "cardiac output", "GFR"],
