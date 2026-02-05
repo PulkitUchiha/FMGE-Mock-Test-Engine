@@ -128,7 +128,7 @@ class SubjectConfig:
         "Psychiatry": ["depression", "schizophrenia", "anxiety"],
         "Dermatology": ["skin", "rash", "lesion", "eczema"],
         "Radiology": ["x-ray", "ct", "mri", "ultrasound", "radiograph"],
-        "Anesthesia": ["sedation", "intubation", "ventilation"],
+        "Anaesthesia": ["sedation", "intubation", "ventilation"],
         "Orthopedics": ["fracture", "joint", "dislocation"],
     })
 
