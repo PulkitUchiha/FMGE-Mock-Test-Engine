@@ -8,15 +8,30 @@ from pathlib import Path
 import sys
 import base64
 import random
-from datetime import datetime, timedelta
-import json
-import pathlib
+from datetime import datetime
+import time
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from storage.json_storage import QuestionStorage
 from config.settings import DATA_DIR, EXAM_CONFIG
+
+# ===== MOCK EXAM IMPORTS =====
+from engine.mock_exam_engine import (
+    init_mock_session,
+    start_exam_if_needed,
+    remaining_time
+)
+from storage.json_storage import MockExamStorage
+from engine.mock_analysis_adapter import analyze_mock_attempt
+from storage.mock_users import validate_user
+
+
+def get_current_mock_id():
+    """Returns the official mock ID for today."""
+    return f"mock_fmge_{datetime.now().strftime('%Y_%m_%d')}"
+
 
 # Page config
 st.set_page_config(
@@ -26,7 +41,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for better image display
+# Custom CSS
 st.markdown("""
 <style>
     .main-header {
@@ -112,17 +127,11 @@ st.markdown("""
 
 
 def load_image_as_base64(image_path: str) -> str:
-    """
-    Robust image loader for Streamlit Cloud + Windows.
-    Correctly resolves paths relative to DATA_DIR.
-    """
+    """Robust image loader for Streamlit Cloud + Windows."""
     try:
-        # Normalize Windows paths
         image_path = image_path.replace("\\", "/")
-
         path = Path(image_path)
 
-        # If relative, resolve from DATA_DIR (this is the key fix)
         if not path.is_absolute():
             path = DATA_DIR / path
 
@@ -143,13 +152,10 @@ def load_image_as_base64(image_path: str) -> str:
         return None
 
 
-
-
 def display_question_image(question):
     """Display image for a question if available"""
     if question.images:
         for img_path in question.images:
-            # Check if it's already a data URI
             if img_path.startswith('data:'):
                 st.markdown(f'''
                     <div class="question-image">
@@ -157,7 +163,6 @@ def display_question_image(question):
                     </div>
                 ''', unsafe_allow_html=True)
             else:
-                # Load from file
                 img_data = load_image_as_base64(img_path)
                 if img_data:
                     st.markdown(f'''
@@ -167,7 +172,7 @@ def display_question_image(question):
                     ''', unsafe_allow_html=True)
                 else:
                     st.warning(f"⚠️ Image file not found: {img_path}")
-    
+
     elif question.has_image_reference:
         st.markdown('''
             <div class="image-missing">
@@ -181,81 +186,98 @@ def init_session_state():
     if 'questions' not in st.session_state:
         storage = QuestionStorage()
         st.session_state.questions = storage.load_questions()
-    
+
     if 'current_page' not in st.session_state:
         st.session_state.current_page = 'home'
-    
+
     if 'exam_active' not in st.session_state:
         st.session_state.exam_active = False
-    
+
     if 'exam_questions' not in st.session_state:
         st.session_state.exam_questions = []
-    
+
     if 'exam_answers' not in st.session_state:
         st.session_state.exam_answers = {}
-    
+
     if 'exam_submitted' not in st.session_state:
         st.session_state.exam_submitted = False
-    
+
     if 'current_q_index' not in st.session_state:
         st.session_state.current_q_index = 0
-    
+
     if 'exam_start_time' not in st.session_state:
         st.session_state.exam_start_time = None
+
+    # ===== MOCK EXAM STATE =====
+    if 'exam_mode' not in st.session_state:
+        st.session_state.exam_mode = 'practice'
+
+    if 'user_id' not in st.session_state:
+        st.session_state.user_id = None
 
 
 def render_sidebar():
     """Render navigation sidebar"""
     st.sidebar.markdown("## 🩺 FMGE Practice")
     st.sidebar.markdown("---")
-    
-    # Navigation buttons
+
+    # 🔒 Lock sidebar during mock exam
+    if st.session_state.get('exam_mode') == 'mock':
+        st.sidebar.info("📝 Mock Exam in Progress")
+        st.sidebar.markdown("Navigation locked")
+        return
+
     if st.sidebar.button("🏠 Home", use_container_width=True):
         st.session_state.current_page = 'home'
         st.session_state.exam_active = False
         st.rerun()
-    
+
     if st.sidebar.button("📝 Practice", use_container_width=True):
         st.session_state.current_page = 'practice'
         st.rerun()
-    
+
+    if st.sidebar.button("🎯 Real Mock Test", use_container_width=True):
+        st.session_state.current_page = 'mock_login'
+        st.rerun()
+
     if st.sidebar.button("📖 Browse Questions", use_container_width=True):
         st.session_state.current_page = 'browse'
         st.rerun()
-    
+
     if st.sidebar.button("🖼️ Image Questions", use_container_width=True):
         st.session_state.current_page = 'images'
         st.rerun()
-    
+
     if st.sidebar.button("📊 Statistics", use_container_width=True):
         st.session_state.current_page = 'stats'
         st.rerun()
-    
+
     st.sidebar.markdown("---")
-    
-    # Quick stats
+
     total = len(st.session_state.questions)
     with_images = sum(1 for q in st.session_state.questions if q.images)
-    
+
     st.sidebar.metric("Total Questions", total)
     st.sidebar.metric("With Images", with_images)
 
 
 def render_home():
     """Render home page"""
-    st.markdown('<h1 class="main-header">🩺 FMGE Practice Engine</h1>', unsafe_allow_html=True)
-    
+    st.markdown(
+        '<h1 class="main-header">🩺 FMGE Practice Engine</h1>',
+        unsafe_allow_html=True,
+    )
+
     st.markdown("""
     ### Welcome to your FMGE preparation platform!
     
     Practice with real FMGE questions including **image-based questions**.
     """)
-    
-    # Stats cards
+
     questions = st.session_state.questions
-    
+
     col1, col2, col3, col4 = st.columns(4)
-    
+
     with col1:
         st.markdown(f'''
             <div class="stat-card">
@@ -263,7 +285,7 @@ def render_home():
                 <p>Total Questions</p>
             </div>
         ''', unsafe_allow_html=True)
-    
+
     with col2:
         with_ans = sum(1 for q in questions if q.correct_answer)
         st.markdown(f'''
@@ -272,7 +294,7 @@ def render_home():
                 <p>With Answers</p>
             </div>
         ''', unsafe_allow_html=True)
-    
+
     with col3:
         with_img = sum(1 for q in questions if q.images)
         st.markdown(f'''
@@ -281,7 +303,7 @@ def render_home():
                 <p>With Images</p>
             </div>
         ''', unsafe_allow_html=True)
-    
+
     with col4:
         subjects = len(set(q.subject for q in questions if q.subject))
         st.markdown(f'''
@@ -290,47 +312,59 @@ def render_home():
                 <p>Subjects</p>
             </div>
         ''', unsafe_allow_html=True)
-    
+
     st.markdown("---")
-    
-    # Quick actions
+
     st.subheader("🚀 Quick Start")
-    
+
     col1, col2, col3 = st.columns(3)
-    
+
     with col1:
         if st.button("📝 Start Practice (50 Qs)", use_container_width=True, type="primary"):
-            start_exam(50)
-    
+            start_practice_exam(50)
+
     with col2:
-        if st.button("📋 Full Mock (150 Qs)", use_container_width=True):
-            start_exam(150)
-    
+        if st.button("📋 Practice Exam (150 Qs)", use_container_width=True):
+            start_practice_exam(150)
+
     with col3:
         if st.button("🖼️ Image Questions Only", use_container_width=True):
-            start_exam(50, images_only=True)
+            start_practice_exam(50, images_only=True)
+
+    st.markdown("---")
+
+    # Real Mock Test section on home page
+    st.subheader("🎯 Real Mock Test")
+    st.markdown("""
+    Take a **timed mock exam** that simulates the real FMGE experience:
+    - 🔒 **150 questions** with countdown timer
+    - 📊 **Detailed analysis** after submission
+    - 🚫 **One attempt per day** — just like the real exam
+    """)
+
+    if st.button("🎯 Start Real Mock Test", use_container_width=True, type="primary"):
+        st.session_state.current_page = 'mock_login'
+        st.rerun()
 
 
-def start_exam(num_questions: int, images_only: bool = False):
-    """Start a new exam session"""
+def start_practice_exam(num_questions: int, images_only: bool = False):
+    """Start a new practice exam session"""
     questions = st.session_state.questions
-    
-    # Filter questions
+
     available = [q for q in questions if q.is_valid and q.correct_answer]
-    
+
     if images_only:
         available = [q for q in available if q.images]
-    
+
     if len(available) < num_questions:
         num_questions = len(available)
-    
+
     if num_questions == 0:
         st.error("No questions available!")
         return
-    
-    # Select random questions
+
     selected = random.sample(available, num_questions)
-    
+
     st.session_state.exam_questions = selected
     st.session_state.exam_answers = {}
     st.session_state.exam_submitted = False
@@ -342,52 +376,50 @@ def start_exam(num_questions: int, images_only: bool = False):
 
 
 def render_exam():
-    """Render active exam"""
+    """Render active practice exam"""
     if not st.session_state.exam_active:
         st.warning("No active exam. Start a new practice session.")
         if st.button("Go to Practice"):
             st.session_state.current_page = 'practice'
             st.rerun()
         return
-    
-    questions = st.session_state.exam_questions
-    current_idx = st.session_state.current_q_index
-    
+
     if st.session_state.exam_submitted:
         render_exam_results()
         return
-    
+
+    questions = st.session_state.exam_questions
+    current_idx = st.session_state.current_q_index
+
     # Header
     col1, col2, col3 = st.columns([2, 1, 1])
-    
+
     with col1:
         elapsed = datetime.now() - st.session_state.exam_start_time
         mins = int(elapsed.total_seconds() // 60)
         secs = int(elapsed.total_seconds() % 60)
         st.markdown(f"### ⏱️ Time: {mins:02d}:{secs:02d}")
-    
+
     with col2:
         st.markdown(f"### Question {current_idx + 1}/{len(questions)}")
-    
+
     with col3:
         answered = len(st.session_state.exam_answers)
         st.markdown(f"### ✅ {answered}/{len(questions)}")
-    
+
     st.markdown("---")
-    
+
     # Current question
     question = questions[current_idx]
-    
-    # Question text
+
     st.markdown(f'''
         <div class="question-box">
             <strong>Q{current_idx + 1}.</strong> {question.question_text}
         </div>
     ''', unsafe_allow_html=True)
-    
-    # Display image if available
+
     display_question_image(question)
-    
+
     # Options
     options = {
         'A': question.option_a,
@@ -395,71 +427,85 @@ def render_exam():
         'C': question.option_c,
         'D': question.option_d,
     }
-    
+
     current_answer = st.session_state.exam_answers.get(question.id)
-    
-    selected = st.radio(
+
+    # Save answer immediately via on_change callback
+    def save_practice_answer():
+        picked = st.session_state[f"q_{question.id}"]
+        if picked:
+            st.session_state.exam_answers[question.id] = picked
+
+    st.radio(
         "Select your answer:",
         options=['A', 'B', 'C', 'D'],
         format_func=lambda x: f"{x}. {options[x]}",
         index=['A', 'B', 'C', 'D'].index(current_answer) if current_answer else None,
-        key=f"q_{question.id}"
+        key=f"q_{question.id}",
+        on_change=save_practice_answer
     )
-    
-    # Save answer
-    if selected:
-        st.session_state.exam_answers[question.id] = selected
-    
+
     st.markdown("---")
-    
-    # Navigation
+
+    # Navigation buttons
     col1, col2, col3, col4, col5 = st.columns(5)
-    
+
     with col1:
         if st.button("⬅️ Previous", disabled=current_idx == 0):
             st.session_state.current_q_index = current_idx - 1
             st.rerun()
-    
+
     with col2:
         if st.button("➡️ Next", disabled=current_idx >= len(questions) - 1):
             st.session_state.current_q_index = current_idx + 1
             st.rerun()
-    
+
     with col3:
         if st.button("🔀 Random"):
             st.session_state.current_q_index = random.randint(0, len(questions) - 1)
             st.rerun()
-    
+
     with col4:
         if st.button("❌ Clear"):
             if question.id in st.session_state.exam_answers:
                 del st.session_state.exam_answers[question.id]
             st.rerun()
-    
+
     with col5:
         if st.button("📤 Submit", type="primary"):
             st.session_state.exam_submitted = True
             st.rerun()
-    
+
+    # ── Question Navigator Grid ──
     st.markdown("---")
-    st.markdown("### Question Navigator")
+    st.markdown("### 📋 Question Navigator")
 
-    # Adjust buttons per row (mobile-friendly)
-    buttons_per_row = 4 if st.sidebar else 8
+    answered_count = len(st.session_state.exam_answers)
+    unanswered_count = len(questions) - answered_count
+    st.caption(f"✅ Answered: {answered_count}  |  ⬜ Unanswered: {unanswered_count}")
 
+    buttons_per_row = 10
     total_questions = len(questions)
 
     for row_start in range(0, total_questions, buttons_per_row):
-        row_questions = questions[row_start: row_start + buttons_per_row]
-        cols = st.columns(len(row_questions))
+        row_end = min(row_start + buttons_per_row, total_questions)
+        num_in_row = row_end - row_start
+        cols = st.columns(num_in_row)
 
-        for col, q in zip(cols, row_questions):
-            i = questions.index(q)
-            answered = q.id in st.session_state.exam_answers
+        for col_idx in range(num_in_row):
+            i = row_start + col_idx
+            q = questions[i]
+            is_answered = q.id in st.session_state.exam_answers
+            is_current = (i == current_idx)
 
-            label = f"{'✅' if answered else '⬜'} {i + 1}"
+            if is_current:
+                label = f"👉 {i + 1}"
+            elif is_answered:
+                label = f"✅ {i + 1}"
+            else:
+                label = f"⬜ {i + 1}"
 
-            with col:
+            with cols[col_idx]:
                 if st.button(label, key=f"nav_{i}"):
                     st.session_state.current_q_index = i
                     st.rerun()
@@ -469,12 +515,11 @@ def render_exam_results():
     """Render exam results with images"""
     questions = st.session_state.exam_questions
     answers = st.session_state.exam_answers
-    
-    # Calculate score
+
     correct = 0
     incorrect = 0
     unattempted = 0
-    
+
     for q in questions:
         user_ans = answers.get(q.id)
         if user_ans is None:
@@ -483,80 +528,82 @@ def render_exam_results():
             correct += 1
         else:
             incorrect += 1
-    
-    # Summary
+
+    # Show total time taken
+    if st.session_state.exam_start_time:
+        total_elapsed = int((datetime.now() - st.session_state.exam_start_time).total_seconds())
+        hrs = total_elapsed // 3600
+        mins = (total_elapsed % 3600) // 60
+        secs = total_elapsed % 60
+        if hrs > 0:
+            st.info(f"⏱ Total Time: {hrs:02d}:{mins:02d}:{secs:02d}")
+        else:
+            st.info(f"⏱ Total Time: {mins:02d}:{secs:02d}")
+
     st.markdown("## 📊 Exam Results")
-    
+
     col1, col2, col3, col4 = st.columns(4)
-    
+
     with col1:
         st.metric("Score", f"{correct}/{len(questions)}")
-    
+
     with col2:
         accuracy = (correct / (correct + incorrect) * 100) if (correct + incorrect) > 0 else 0
         st.metric("Accuracy", f"{accuracy:.1f}%")
-    
+
     with col3:
         st.metric("Correct", correct)
-    
+
     with col4:
         st.metric("Incorrect", incorrect)
-    
+
     st.markdown("---")
-    
-    # Buttons
+
     col1, col2 = st.columns(2)
-    
+
     with col1:
         if st.button("🔄 New Exam", type="primary"):
             st.session_state.exam_active = False
             st.session_state.current_page = 'practice'
             st.rerun()
-    
+
     with col2:
         show_review = st.checkbox("📖 Show Detailed Review", value=True)
-    
+
     if show_review:
         st.markdown("---")
         st.markdown("## 📖 Question Review")
-        
-        # Filter options
+
         filter_opt = st.radio(
             "Show:",
             ["All", "Incorrect Only", "Correct Only", "Unattempted"],
-            horizontal=True
+            horizontal=True,
         )
-        
+
         for i, q in enumerate(questions):
             user_ans = answers.get(q.id)
             is_correct = user_ans == q.correct_answer
             is_attempted = user_ans is not None
-            
-            # Apply filter
+
             if filter_opt == "Incorrect Only" and (is_correct or not is_attempted):
                 continue
             if filter_opt == "Correct Only" and not is_correct:
                 continue
             if filter_opt == "Unattempted" and is_attempted:
                 continue
-            
-            # Question card
+
             with st.expander(
-                f"{'✅' if is_correct else '❌' if is_attempted else '⬜'} Q{i+1}. {q.question_text[:80]}...",
-                expanded=not is_correct and is_attempted
+                f"{'✅' if is_correct else '❌' if is_attempted else '⬜'} "
+                f"Q{i+1}. {q.question_text[:80]}...",
+                expanded=not is_correct and is_attempted,
             ):
-                # Question text
                 st.markdown(f"**Question:** {q.question_text}")
-                
-                # Display image
                 display_question_image(q)
-                
                 st.markdown("---")
-                
-                # Options with highlighting
+
                 for opt in ['A', 'B', 'C', 'D']:
                     opt_text = getattr(q, f'option_{opt.lower()}')
-                    
+
                     if opt == q.correct_answer and opt == user_ans:
                         st.markdown(f'''
                             <div class="option-correct">
@@ -581,8 +628,7 @@ def render_exam_results():
                                 ⚪ <strong>{opt}.</strong> {opt_text}
                             </div>
                         ''', unsafe_allow_html=True)
-                
-                # Explanation
+
                 if q.explanation:
                     st.markdown(f'''
                         <div class="explanation-box">
@@ -590,176 +636,402 @@ def render_exam_results():
                             {q.explanation}
                         </div>
                     ''', unsafe_allow_html=True)
-                
+
                 st.caption(f"Source: {q.source_file} | Subject: {q.subject or 'Untagged'}")
+
+
+def render_mock_login():
+    """Mock exam login page"""
+    st.header("🎯 Real Mock Test - Login")
+
+    st.markdown("""
+    **Rules:**
+    - ⏱ Timed exam — same duration as real FMGE
+    - 📝 150 questions, no going back after submission
+    - 🚫 One attempt per day
+    - 🔒 Navigation locked during exam
+    """)
+
+    st.markdown("---")
+
+    user_id = st.text_input("Registration ID")
+    password = st.text_input("Password / DOB", type="password")
+
+    if st.button("🎯 Enter Mock Exam", type="primary"):
+        if not validate_user(user_id, password):
+            st.error("Invalid credentials")
+            return
+
+        st.session_state.user_id = user_id
+        st.session_state.exam_mode = "mock"
+        st.session_state.current_page = "mock_exam"
+        st.rerun()
+
+    st.markdown("---")
+    if st.button("⬅️ Back to Home"):
+        st.session_state.current_page = 'home'
+        st.rerun()
+
+
+def render_mock_exam():
+    """Render the real mock exam with timer and navigator"""
+    mock_store = MockExamStorage()
+    mock_id = get_current_mock_id()
+    user_id = st.session_state.user_id
+
+    # 🚫 Prevent re-attempt
+    if mock_store.mock_attempt_exists(user_id, mock_id):
+        st.error("❌ You have already attempted today's mock exam.")
+        st.markdown("Come back tomorrow for a new mock test!")
+        if st.button("🏠 Go Home"):
+            st.session_state.exam_mode = "practice"
+            st.session_state.current_page = "home"
+            st.rerun()
+        st.stop()
+
+    # Init mock session once
+    init_mock_session(st.session_state.questions)
+
+    time_left = remaining_time()
+
+    # ⏱ Auto submit when time runs out
+    if time_left <= 0:
+        submit_mock_exam()
+        return
+
+    # ── Timer display ──
+    t_mins = time_left // 60
+    t_secs = time_left % 60
+
+    if time_left <= 300:
+        st.error(f"⏰ LAST 5 MINUTES — {t_mins:02d}:{t_secs:02d}")
+    elif time_left <= 900:
+        st.warning(f"⏱ Time Left: {t_mins:02d}:{t_secs:02d}")
+    else:
+        st.info(f"⏱ Time Left: {t_mins:02d}:{t_secs:02d}")
+
+    idx = st.session_state.mock_current_q
+    questions = st.session_state.mock_questions
+    question = questions[idx]
+
+    # ── Header info ──
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown(f"### Question {idx + 1}/150")
+    with col2:
+        answered_count = sum(1 for a in st.session_state.mock_answers if a is not None)
+        st.markdown(f"### ✅ {answered_count}/150")
+
+    st.markdown("---")
+
+    # ── Question ──
+    st.markdown(f"""
+        <div class="question-box">
+            <strong>Q{idx+1}.</strong> {question.question_text}
+        </div>
+    """, unsafe_allow_html=True)
+
+    display_question_image(question)
+
+    # ── Options ──
+    options = {
+        'A': question.option_a,
+        'B': question.option_b,
+        'C': question.option_c,
+        'D': question.option_d,
+    }
+
+    current_answer = st.session_state.mock_answers[idx]
+
+    # Save answer immediately via on_change callback
+    def save_mock_answer():
+        picked = st.session_state[f"mock_q_{idx}"]
+        if picked:
+            start_exam_if_needed()
+            st.session_state.mock_answers[idx] = picked
+
+    st.radio(
+        "Select your answer:",
+        options=['A', 'B', 'C', 'D'],
+        format_func=lambda x: f"{x}. {options[x]}",
+        index=['A', 'B', 'C', 'D'].index(current_answer) if current_answer else None,
+        key=f"mock_q_{idx}",
+        on_change=save_mock_answer
+    )
+
+    st.markdown("---")
+
+    # ── Navigation buttons ──
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        if st.button("⬅️ Previous", disabled=idx == 0):
+            st.session_state.mock_current_q -= 1
+            st.rerun()
+
+    with col2:
+        if st.button("➡️ Next", disabled=idx >= 149):
+            st.session_state.mock_current_q += 1
+            st.rerun()
+
+    with col3:
+        if st.button("❌ Clear"):
+            st.session_state.mock_answers[idx] = None
+            st.rerun()
+
+    with col4:
+        if st.button("📤 Submit Exam", type="primary"):
+            unanswered = sum(1 for a in st.session_state.mock_answers if a is None)
+            if unanswered > 0:
+                st.warning(f"⚠️ You have {unanswered} unanswered questions!")
+                st.session_state['confirm_submit'] = True
+            else:
+                submit_mock_exam()
+
+    # Confirm submit if unanswered questions
+    if st.session_state.get('confirm_submit'):
+        st.markdown("---")
+        st.error("Are you sure you want to submit with unanswered questions?")
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("✅ Yes, Submit Now", type="primary"):
+                st.session_state['confirm_submit'] = False
+                submit_mock_exam()
+        with c2:
+            if st.button("❌ No, Continue Exam"):
+                st.session_state['confirm_submit'] = False
+                st.rerun()
+
+    # ══════════════════════════════════════════════
+    # QUESTION NAVIGATOR GRID
+    # ══════════════════════════════════════════════
+    st.markdown("---")
+    st.markdown("### 📋 Question Navigator")
+
+    answered_total = sum(1 for a in st.session_state.mock_answers if a is not None)
+    unanswered_total = 150 - answered_total
+    st.caption(f"✅ Answered: {answered_total}  |  ⬜ Unanswered: {unanswered_total}")
+
+    buttons_per_row = 10
+    total_questions = len(questions)
+
+    for row_start in range(0, total_questions, buttons_per_row):
+        row_end = min(row_start + buttons_per_row, total_questions)
+        num_in_row = row_end - row_start
+        cols = st.columns(num_in_row)
+
+        for col_idx in range(num_in_row):
+            i = row_start + col_idx
+            is_answered = st.session_state.mock_answers[i] is not None
+            is_current = (i == idx)
+
+            if is_current:
+                label = f"👉 {i + 1}"
+            elif is_answered:
+                label = f"✅ {i + 1}"
+            else:
+                label = f"⬜ {i + 1}"
+
+            with cols[col_idx]:
+                if st.button(label, key=f"mock_nav_{i}"):
+                    st.session_state.mock_current_q = i
+                    st.rerun()
+
+
+def submit_mock_exam():
+    """Submit mock exam and save results"""
+    mock_store = MockExamStorage()
+    mock_id = get_current_mock_id()
+
+    analysis = analyze_mock_attempt(
+        user_id=st.session_state.user_id,
+        mock_id=mock_id,
+        questions=st.session_state.mock_questions,
+        answers=st.session_state.mock_answers,
+        start_time=st.session_state.mock_start_time,
+        end_time=time.time(),
+    )
+
+    mock_store.save_mock_attempt({
+        "user_id": st.session_state.user_id,
+        "mock_id": mock_id,
+        "mode": "mock",
+        "raw": {
+            "date": datetime.now().strftime("%Y-%m-%d"),
+            "start_time": st.session_state.mock_start_time,
+            "end_time": time.time(),
+            "answers": st.session_state.mock_answers,
+        },
+        "analysis": analysis.to_dict(),
+    })
+
+    st.success("✅ Mock Exam Submitted Successfully!")
+    st.info(
+        f"📊 You answered **{analysis.correct} out of "
+        f"{analysis.total_questions}** questions correctly."
+    )
+
+    # Exit mock mode
+    st.session_state.exam_mode = "practice"
+    st.session_state.current_page = "home"
+    st.session_state['confirm_submit'] = False
+    st.stop()
 
 
 def render_practice():
     """Render practice setup page"""
     st.header("📝 Start Practice Session")
-    
+
     questions = st.session_state.questions
-    
-    # Options
+
     col1, col2 = st.columns(2)
-    
+
     with col1:
         num_questions = st.slider("Number of Questions", 10, min(200, len(questions)), 50)
-    
+
     with col2:
         mode = st.selectbox("Mode", ["All Questions", "Image Questions Only", "Non-Image Questions"])
-    
-    # Subject filter
+
     subjects = sorted(set(q.subject for q in questions if q.subject))
     subjects = ["All Subjects"] + subjects
-    
+
     selected_subject = st.selectbox("Filter by Subject", subjects)
-    
-    # Filter questions
+
     available = [q for q in questions if q.is_valid and q.correct_answer]
-    
+
     if mode == "Image Questions Only":
         available = [q for q in available if q.images]
     elif mode == "Non-Image Questions":
         available = [q for q in available if not q.images and not q.has_image_reference]
-    
+
     if selected_subject != "All Subjects":
         available = [q for q in available if q.subject == selected_subject]
-    
+
     st.info(f"📊 {len(available)} questions available with current filters")
-    
-    # Start button
+
     if st.button("🚀 Start Practice", type="primary", use_container_width=True):
         if len(available) >= num_questions:
             selected = random.sample(available, num_questions)
         else:
             selected = available
-        
+
         if selected:
-            st.session_state.exam_questions = selected
-            st.session_state.exam_answers = {}
-            st.session_state.exam_submitted = False
-            st.session_state.exam_active = True
-            st.session_state.current_q_index = 0
-            st.session_state.exam_start_time = datetime.now()
-            st.session_state.current_page = 'exam'
-            st.rerun()
+            start_practice_exam_with_questions(selected)
         else:
             st.error("No questions match your filters!")
+
+
+def start_practice_exam_with_questions(selected_questions):
+    """Start practice exam with pre-selected questions"""
+    st.session_state.exam_questions = selected_questions
+    st.session_state.exam_answers = {}
+    st.session_state.exam_submitted = False
+    st.session_state.exam_active = True
+    st.session_state.current_q_index = 0
+    st.session_state.exam_start_time = datetime.now()
+    st.session_state.current_page = 'exam'
+    st.rerun()
 
 
 def render_browse():
     """Browse all questions"""
     st.header("📖 Browse Questions")
-    
+
     questions = st.session_state.questions
-    
-    # Filters
+
     col1, col2, col3 = st.columns(3)
-    
+
     with col1:
         search = st.text_input("🔍 Search", "")
-    
+
     with col2:
         subjects = ["All"] + sorted(set(q.subject for q in questions if q.subject))
         subject = st.selectbox("Subject", subjects)
-    
+
     with col3:
         image_filter = st.selectbox("Images", ["All", "With Images", "Without Images"])
-    
-    # Apply filters
+
     filtered = questions
-    
+
     if search:
         filtered = [q for q in filtered if search.lower() in q.question_text.lower()]
-    
+
     if subject != "All":
         filtered = [q for q in filtered if q.subject == subject]
-    
+
     if image_filter == "With Images":
         filtered = [q for q in filtered if q.images]
     elif image_filter == "Without Images":
         filtered = [q for q in filtered if not q.images]
-    
+
     st.info(f"Showing {len(filtered)} questions")
-    
-    # Pagination
+
     per_page = 10
     total_pages = (len(filtered) - 1) // per_page + 1 if filtered else 1
-    
+
     page = st.number_input("Page", 1, total_pages, 1)
-    
+
     start_idx = (page - 1) * per_page
     end_idx = start_idx + per_page
-    
-    # Display questions
+
     for i, q in enumerate(filtered[start_idx:end_idx]):
         with st.expander(f"Q{start_idx + i + 1}. {q.question_text[:100]}..."):
             st.markdown(f"**Question:** {q.question_text}")
-            
-            # Display image
             display_question_image(q)
-            
             st.markdown("---")
-            
+
             col1, col2 = st.columns(2)
-            
+
             with col1:
                 st.markdown(f"**A.** {q.option_a}")
                 st.markdown(f"**B.** {q.option_b}")
-            
+
             with col2:
                 st.markdown(f"**C.** {q.option_c}")
                 st.markdown(f"**D.** {q.option_d}")
-            
+
             if q.correct_answer:
                 st.success(f"✅ Correct Answer: **{q.correct_answer}**")
-            
+
             if q.explanation:
                 st.info(f"📚 {q.explanation[:500]}...")
-            
+
             st.caption(f"Source: {q.source_file} | Subject: {q.subject or 'Untagged'}")
 
 
 def render_image_questions():
     """View only image-based questions"""
     st.header("🖼️ Image-Based Questions")
-    
+
     questions = st.session_state.questions
-    
-    # Filter to image questions
+
     image_questions = [q for q in questions if q.images]
     needs_images = [q for q in questions if q.has_image_reference and not q.images]
-    
-    # Stats
+
     col1, col2, col3 = st.columns(3)
-    
+
     with col1:
         st.metric("With Images", len(image_questions))
-    
+
     with col2:
         st.metric("Missing Images", len(needs_images))
-    
+
     with col3:
         st.metric("Total Image Refs", len(image_questions) + len(needs_images))
-    
+
     st.markdown("---")
-    
-    # Tabs
+
     tab1, tab2 = st.tabs(["✅ With Images", "⚠️ Missing Images"])
-    
+
     with tab1:
         if not image_questions:
             st.info("No questions with linked images found.")
         else:
-            for i, q in enumerate(image_questions[:20]):  # Show first 20
+            for i, q in enumerate(image_questions[:20]):
                 with st.expander(f"Q{i+1}. {q.question_text[:80]}...", expanded=(i < 3)):
                     st.markdown(f"**Question:** {q.question_text}")
-                    
-                    # Display image prominently
                     display_question_image(q)
-                    
-                    # Options
+
                     cols = st.columns(2)
                     with cols[0]:
                         st.markdown(f"**A.** {q.option_a}")
@@ -767,16 +1039,16 @@ def render_image_questions():
                     with cols[1]:
                         st.markdown(f"**C.** {q.option_c}")
                         st.markdown(f"**D.** {q.option_d}")
-                    
+
                     if q.correct_answer:
                         st.success(f"Answer: {q.correct_answer}")
-    
+
     with tab2:
         if not needs_images:
             st.success("All image references have linked images!")
         else:
             st.warning(f"{len(needs_images)} questions reference images but couldn't be linked.")
-            
+
             for i, q in enumerate(needs_images[:20]):
                 with st.expander(f"Q{i+1}. {q.question_text[:80]}..."):
                     st.markdown(f"**Question:** {q.question_text}")
@@ -788,75 +1060,76 @@ def render_image_questions():
 def render_stats():
     """Render statistics page"""
     st.header("📊 Question Bank Statistics")
-    
+
     questions = st.session_state.questions
-    
+
     if not questions:
         st.warning("No questions loaded.")
         return
-    
-    # Overall stats
+
     col1, col2, col3, col4 = st.columns(4)
-    
+
     with col1:
         st.metric("Total Questions", len(questions))
-    
+
     with col2:
         with_ans = sum(1 for q in questions if q.correct_answer)
         st.metric("With Answers", with_ans)
-    
+
     with col3:
         with_exp = sum(1 for q in questions if q.explanation)
         st.metric("With Explanations", with_exp)
-    
+
     with col4:
         with_img = sum(1 for q in questions if q.images)
         st.metric("With Images", with_img)
-    
+
     st.markdown("---")
-    
-    # Subject distribution
+
     st.subheader("📚 Subject Distribution")
-    
+
     subject_counts = {}
     for q in questions:
         subj = q.subject or "Untagged"
         subject_counts[subj] = subject_counts.get(subj, 0) + 1
-    
-    # Sort by count
+
     sorted_subjects = sorted(subject_counts.items(), key=lambda x: -x[1])
-    
+
     for subj, count in sorted_subjects[:15]:
         pct = count / len(questions) * 100
         st.progress(pct / 100, f"{subj}: {count} ({pct:.1f}%)")
-    
+
     st.markdown("---")
-    
-    # Source distribution
+
     st.subheader("📁 Source Files")
-    
+
     source_counts = {}
     for q in questions:
         source_counts[q.source_file] = source_counts.get(q.source_file, 0) + 1
-    
+
     for source, count in sorted(source_counts.items(), key=lambda x: -x[1]):
         st.text(f"{source}: {count} questions")
 
 
 def main():
-
     init_session_state()
-    render_sidebar()
-    
-    # Route to current page
+
+    # Sidebar only if NOT in mock mode
+    if st.session_state.exam_mode != 'mock':
+        render_sidebar()
+
     page = st.session_state.current_page
-    
+
     if page == 'home':
         render_home()
     elif page == 'practice':
         render_practice()
     elif page == 'exam':
         render_exam()
+    elif page == 'mock_login':
+        render_mock_login()
+    elif page == 'mock_exam':
+        render_mock_exam()
     elif page == 'browse':
         render_browse()
     elif page == 'images':

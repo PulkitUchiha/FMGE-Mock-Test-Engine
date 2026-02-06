@@ -244,3 +244,55 @@ class QuestionStorage:
         
         logger.info(f"Exported {count} questions to {output_path}")
         return count
+    
+# ===========================
+# Mock Exam Attempt Storage
+# ===========================
+
+class MockExamStorage:
+    """
+    Handles persistence of mock exam attempts.
+    Separate from QuestionStorage by design.
+    """
+
+    BASE_DIR = Path("data/sessions/mock_exams")
+
+    def __init__(self):
+        self.BASE_DIR.mkdir(parents=True, exist_ok=True)
+
+    def mock_attempt_exists(self, user_id: str, mock_id: str) -> bool:
+        path = self.BASE_DIR / user_id / f"{mock_id}.json"
+        return path.exists()
+
+    def save_mock_attempt(self, data: Dict) -> None:
+        """
+        Persist a completed mock exam attempt.
+        """
+        user_dir = self.BASE_DIR / data["user_id"]
+        user_dir.mkdir(parents=True, exist_ok=True)
+
+        path = user_dir / f"{data['mock_id']}.json"
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+
+        logger.info(
+            f"Saved mock exam attempt for user={data['user_id']} mock={data['mock_id']}"
+        )
+
+    def load_mock_attempt(self, user_id: str, mock_id: str) -> Optional[Dict]:
+        path = self.BASE_DIR / user_id / f"{mock_id}.json"
+        if not path.exists():
+            return None
+
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+
+    def list_user_attempts(self, user_id: str) -> List[str]:
+        """
+        List all mock IDs attempted by a user.
+        """
+        user_dir = self.BASE_DIR / user_id
+        if not user_dir.exists():
+            return []
+
+        return [p.stem for p in user_dir.glob("*.json")]
