@@ -12,3 +12,4 @@ data/raw_pdfs/
 v0
 question extractor.py
 data/fmge_questions.json
+data/extracted_images
